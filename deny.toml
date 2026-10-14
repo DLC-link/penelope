@@ -1,0 +1,15 @@
+# CI checks RustSec advisories with two tools. cargo-deny reads this file,
+# and cargo-audit reads .cargo/audit.toml.
+#
+# cargo-deny skips a crate behind a disabled feature. cargo-audit reads
+# Cargo.lock, so it still flags that crate. An ignore therefore goes in:
+#   * both files, for a finding in code the build compiles;
+#   * only .cargo/audit.toml, for a finding behind a disabled feature.
+#     `cargo tree -i <crate>` prints nothing for such a crate.
+#
+# Every ignore names the crate that brings the advisory in, why no fix
+# exists, and what would make the ignore unsafe. In this file, write it as
+# { id = "RUSTSEC-...", reason = "..." }.
+
+[advisories]
+ignore = []

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Only PR runs are cancelled, so a push to main always finishes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  cargo:
+    name: Format, Clippy & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt
+        run: cargo fmt -- --check
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      # Also runs the README example, which is the crate-level doctest.
+      - name: cargo test
+        run: cargo test --locked --all-features
+      # Fails on a broken intra-doc link, which rustc alone does not check.
+      - name: cargo doc
+        run: cargo doc --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  cargo-audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+
+  cargo-machete:
+    name: Cargo Machete
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bnjbvr/cargo-machete@v0.9.2
