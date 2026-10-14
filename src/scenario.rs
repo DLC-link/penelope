@@ -143,7 +143,8 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
     }
 
     /// Adds a Then step: `probe` is polled until it passes, fails, or
-    /// `deadline` elapses.
+    /// `deadline` elapses. A probe call still running at the deadline is
+    /// cancelled, and the step fails.
     pub fn then<P>(mut self, name: impl Into<String>, deadline: Duration, probe: P) -> Self
     where
         P: for<'a> FnMut(&'a mut F, &'a mut Ctx) -> BoxProbe<'a> + Send + 'static,
@@ -197,14 +198,20 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
                     let kind = StepKind::Then;
                     info!(step_kind = ?kind, step_name = %name, "    {} {}", kind.label(), name);
                     let step_start = Instant::now();
+                    let step_deadline = tokio::time::Instant::from_std(step_start) + *deadline;
                     f.probe_diag().reset();
                     let outcome: Result<()> = loop {
-                        match probe(f, &mut self.ctx).await {
-                            Some(Ok(())) => break Ok(()),
-                            Some(Err(e)) => {
+                        // The deadline bounds each probe call too, so a probe
+                        // that hangs cannot hold the scenario past it.
+                        let attempt =
+                            tokio::time::timeout_at(step_deadline, probe(f, &mut self.ctx)).await;
+                        match attempt {
+                            Err(_) => break Err(timed_out(name, *deadline, f.probe_diag())),
+                            Ok(Some(Ok(()))) => break Ok(()),
+                            Ok(Some(Err(e))) => {
                                 break Err(e.context(format!("THEN \"{name}\" failed")));
                             }
-                            None => {
+                            Ok(None) => {
                                 if let Some(fatal) = f.probe_diag().fatal() {
                                     break Err(anyhow::anyhow!(
                                         "THEN \"{}\" failed fast: same terminal probe error \
@@ -215,20 +222,7 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
                                 }
                                 let elapsed = step_start.elapsed();
                                 if elapsed >= *deadline {
-                                    break Err(match f.probe_diag().last_error() {
-                                        Some(last) => anyhow::anyhow!(
-                                            "THEN \"{}\" timed out after {:?}; \
-                                             last probe error: {}",
-                                            name,
-                                            *deadline,
-                                            last
-                                        ),
-                                        None => anyhow::anyhow!(
-                                            "THEN \"{}\" timed out after {:?}",
-                                            name,
-                                            *deadline
-                                        ),
-                                    });
+                                    break Err(timed_out(name, *deadline, f.probe_diag()));
                                 }
                                 let remaining = *deadline - elapsed;
                                 tokio::time::sleep(std::cmp::min(POLL_INTERVAL, remaining)).await;
@@ -259,6 +253,19 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
             scenario_start.elapsed().as_secs_f64()
         );
         Ok(())
+    }
+}
+
+/// The error for a Then step that reached its deadline, carrying the last
+/// recorded probe failure when there is one.
+fn timed_out(name: &str, deadline: Duration, diag: &ProbeDiag) -> anyhow::Error {
+    match diag.last_error() {
+        Some(last) => {
+            anyhow::anyhow!(
+                "THEN \"{name}\" timed out after {deadline:?}; last probe error: {last}"
+            )
+        }
+        None => anyhow::anyhow!("THEN \"{name}\" timed out after {deadline:?}"),
     }
 }
 
@@ -509,6 +516,62 @@ mod tests {
         assert!(chain.contains("failed fast"), "got: {chain}");
         assert!(chain.contains("participants-status"), "got: {chain}");
         assert!(chain.contains("404"), "got: {chain}");
+    }
+
+    /// The deadline must bound the probe call itself, or a probe that never
+    /// returns keeps the scenario pending forever.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn then_times_out_when_a_probe_hangs() {
+        let mut f = World::new();
+        let scenario = Scenario::new("hang")
+            .then("never returns", Duration::from_millis(100), |_f, _c| {
+                Box::pin(std::future::pending())
+            })
+            .run(&mut f);
+
+        // The outer limit turns a regression into a failure, not a hung suite.
+        let Ok(outcome) = tokio::time::timeout(Duration::from_secs(5), scenario).await else {
+            panic!("the step deadline did not end a probe that never returns");
+        };
+        let err = outcome.unwrap_err();
+        let chain = format!("{err:#}");
+        assert!(
+            chain.contains("THEN \"never returns\" timed out"),
+            "got: {chain}"
+        );
+    }
+
+    /// A probe still running at the deadline is cancelled, so an answer that
+    /// would only arrive later cannot pass the step. The failure it recorded
+    /// before the deadline still reaches the report.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_probe_that_would_pass_after_the_deadline_fails() {
+        let mut f = World::new();
+        let started = Instant::now();
+        let err = Scenario::new("late")
+            .then("answers too late", Duration::from_millis(100), |f, _c| {
+                let diag = f.probe_diag().clone();
+                Box::pin(async move {
+                    diag.record("GET /slow", Class::Transient, "still syncing".to_string());
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Some(Ok(()))
+                })
+            })
+            .run(&mut f)
+            .await
+            .unwrap_err();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "elapsed: {:?}",
+            started.elapsed()
+        );
+        let chain = format!("{err:#}");
+        assert!(chain.contains("timed out"), "got: {chain}");
+        assert!(
+            chain.contains("last probe error: still syncing"),
+            "got: {chain}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

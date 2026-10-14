@@ -103,6 +103,9 @@ A Then probe returns one of three values:
 - `None` means "not observable yet". The runner tries again after 2 seconds.
 - `Some(Err(e))` fails the step at once.
 
+The deadline also limits each probe call. The runner cancels a probe that is
+still running when the deadline passes, and the step fails.
+
 Steps can share state through a context value. Start the scenario with
 `Scenario::with_ctx(name, ctx)`. Each step then receives `&mut ctx` as its
 second argument. A Then probe can store what it observed there for a later
