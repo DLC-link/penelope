@@ -1,10 +1,15 @@
-# cargo-deny is the only RustSec advisories gate in the Bitsafe baseline, so
-# this is the only advisory-exception list the repo has.
+# CI checks RustSec advisories with two tools. cargo-deny reads this file,
+# and cargo-audit reads .cargo/audit.toml.
 #
-# Every ignored RUSTSEC ID carries a `reason` that names the crate that brings
-# it in, why no fix exists, and what would make the ignore unsafe. Do not add
-# an entry for a finding behind a disabled feature: cargo-deny already skips
-# it. Confirm with `cargo tree -i <crate>`.
+# cargo-deny skips a crate behind a disabled feature. cargo-audit reads
+# Cargo.lock, so it still flags that crate. An ignore therefore goes in:
+#   * both files, for a finding in code the build compiles;
+#   * only .cargo/audit.toml, for a finding behind a disabled feature.
+#     `cargo tree -i <crate>` prints nothing for such a crate.
+#
+# Every ignore names the crate that brings the advisory in, why no fix
+# exists, and what would make the ignore unsafe. In this file, write it as
+# { id = "RUSTSEC-...", reason = "..." }.
 
 [advisories]
 ignore = []

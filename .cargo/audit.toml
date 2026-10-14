@@ -1,0 +1,9 @@
+# cargo-audit reads Cargo.lock and flags every advisory in it, even for a
+# crate behind a disabled feature that never compiles. deny.toml explains
+# which file an ignore belongs in.
+#
+# cargo-audit takes plain IDs, so write each ignore's reason in a comment
+# above it.
+
+[advisories]
+ignore = []
