@@ -46,8 +46,8 @@ impl StepKind {
     fn label(self) -> &'static str {
         match self {
             StepKind::Given => "GIVEN",
-            StepKind::When => "WHEN ",
-            StepKind::Then => "THEN ",
+            StepKind::When => "WHEN",
+            StepKind::Then => "THEN",
         }
     }
 }
@@ -172,7 +172,7 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
         for step in &mut self.steps {
             match step {
                 Step::Immediate { kind, name, body } => {
-                    info!(step_kind = ?kind, step_name = %name, "    {} {}", kind.label(), name);
+                    info!(step_kind = ?kind, step_name = %name, "    {:<5} {}", kind.label(), name);
                     let fut = body(f, &mut self.ctx);
                     match fut.await {
                         Ok(()) => {}
@@ -196,7 +196,7 @@ impl<F: Fixture, Ctx: Send + 'static> Scenario<F, Ctx> {
                     probe,
                 } => {
                     let kind = StepKind::Then;
-                    info!(step_kind = ?kind, step_name = %name, "    {} {}", kind.label(), name);
+                    info!(step_kind = ?kind, step_name = %name, "    {:<5} {}", kind.label(), name);
                     let step_start = Instant::now();
                     let step_deadline = tokio::time::Instant::from_std(step_start) + *deadline;
                     f.probe_diag().reset();
@@ -358,10 +358,7 @@ mod tests {
 
         let chain = format!("{err:#}");
         assert!(chain.contains("scenario \"my scn\" failed"), "got: {chain}");
-        assert!(
-            chain.contains("WHEN") && chain.contains("the failing step"),
-            "got: {chain}"
-        );
+        assert!(chain.contains("WHEN \"the failing step\""), "got: {chain}");
         assert!(chain.contains("boom"), "got: {chain}");
     }
 
