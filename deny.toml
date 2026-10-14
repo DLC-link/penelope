@@ -1,0 +1,10 @@
+# cargo-deny is the only RustSec advisories gate in the Bitsafe baseline, so
+# this is the only advisory-exception list the repo has.
+#
+# Every ignored RUSTSEC ID carries a `reason` that names the crate that brings
+# it in, why no fix exists, and what would make the ignore unsafe. Do not add
+# an entry for a finding behind a disabled feature: cargo-deny already skips
+# it. Confirm with `cargo tree -i <crate>`.
+
+[advisories]
+ignore = []
